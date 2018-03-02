@@ -1,0 +1,20 @@
+
+dn: cn=alm,$SUFFIX
+add: objectClass: top
+add: objectClass: almService
+add: almStatements: authoritative
+add: almStatements: default-lease-time 43200
+add: almStatements: max-lease-time 86400
+add: almStatements: one-lease-per-client on
+
+#### Managed permissions ######################################################
+
+dn: cn=alm Administrators,cn=privileges,cn=pbac,$SUFFIX
+add: objectClass: top
+add: objectClass: groupofnames
+add: objectClass: nestedgroup
+only: description: alm Administrators
+
+###############################################################################
+
+plugin: update_managed_permissions
