@@ -1,0 +1,1 @@
+# freeipa_automation_plugins
