@@ -104,7 +104,7 @@ class almservice(LDAPObject):
             'replaces_global_anonymous_aci': True,
             'ipapermbindruletype': 'anonymous',
             'ipapermright': {'read', 'search', 'compare'},
-            'ipapermdefaultattr': {
+            'ipapermdefaultattr':           {
                 'cn', 'objectclass',
                 'almprimarydn', 'almsecondarydn',
                 'almnetmask',
@@ -328,7 +328,7 @@ class almpool(LDAPObject):
         Str(
             'cn',
             cli_name='poolname',
-            label=_('pool Name'),
+            label=_('Pool Name'),
             doc=_('alm pool name.'),
             primary_key=True
         ),
@@ -849,6 +849,33 @@ class almpool_del(Command):
         fhandler = _add_lock('pool', cn)
         try:
             if fhandler:
+                #################check leases and make sure no lease belonging to this pool is valid###############################
+                resultlease = api.Command['almleases_find']()
+
+                allleasesdict = dict()
+
+                # if resultlease['result'] == []:  # 可能没有lease, indicate that this pool has noot been used.
+                #     # unlock
+                #     return dict(result=dict(result=False, value=u'No one lease exists. '), value=cn)
+
+                for lease in resultlease['result']:
+                    expires = ' '
+                    thispoolname = ' '
+                    leasedaddr = ' '
+
+                    for statement in lease['almstatements']:
+
+                        if statement.startswith('poolname '):
+                            (s, v) = statement.split(' ', 1)
+                            thispoolname = v
+
+
+                    if thispoolname == cn:  # this lease is time-out and belongs to the pool
+                        # 完美报错方式，RPC接受this error
+                        raise errors.PublicError('Cannot delete this pool: %s ！Because it still has valid address outside!' %cn)
+                        #return dict(result=dict(result=False, value=u'this pool still has valid address belonging to valid lease outside. '), value=thispoolname, summary=u'cannot delete this pool')
+                ###########################################################################################################
+
                 result = api.Command['almpool_del_almschema']( ###lease method use almpool_mod_almschema
                     cn=u'{0}'.format(cn)
                 )
@@ -1764,10 +1791,11 @@ class alm_lease(Command):
                     almaddressstate=u'leased',
                     almleasestarttime=u'{0}'.format(int(time.time())),
                     almstatements=[
+                        u'{0}'.format("clientid " + clientid),
                         u'{0}'.format("poolname " + poolname),
+                        u'{0}'.format("almpooltype " + pooltype),
                         u'{0}'.format("leasedaddr " + getaddr),
-                        u'{0}'.format("expires " + expiretime),
-                        u'{0}'.format("clientID " + clientid)
+                        u'{0}'.format("expires " + expiretime)
                     ]
 
                 )
@@ -1901,6 +1929,7 @@ class alm_release(Command):
                 pool.insert(leasedaddr)
 
                 modRange = pool.tostring()
+
 
                 cn = u'{0}'.format(poolname)
                 result = api.Command['almpool_mod_almschema'](
