@@ -15,127 +15,114 @@
 // along with this program.  If not, see <http://www.gnu.org/licenses/>.
 
 define(
-    ['freeipa/ipa', 'freeipa/menu', 'freeipa/phases', 'freeipa/reg', 'freeipa/rpc', 'freeipa/net'],
-    function(IPA, menu, phases, reg, rpc, NET) {
+    ['freeipa/ipa', 'freeipa/menu', 'freeipa/phases', 'freeipa/reg', 'freeipa/rpc', 'freeipa/net', 'freeipa/search', 'freeipa/text'],
+    function(IPA, menu, phases, reg, rpc, NET, mod_search, text) {
     // dependencies path: install/ui/src/freeipa
 
         var exp = IPA.alm = {};
-    //different types of facets:
-    //Details: for output of user-show command
-    //Search: for user-find
-    //Association: to display member*
-    //Nested search: special kind of search for nested objects (eg. automount keys in automount maps)
 
-//// Validators ///////////////////////////////////////////////////////////////
+//// modify search_facet //////////////////////////////////////////////
+        IPA.alm.leases_search_facet = function(spec) {
+            spec = spec || {};
 
+            var that = IPA.search_facet(spec);
+            
+            //var dataResult = that.data.result.result;
 
-        // IPA.almrange_validator = function(spec) {
+            that.create_remove_dialog = function() {
+                var values = that.get_selected_values();
 
-        //     spec = spec || {};
-        //     spec.message = spec.message || 'Range must be of the form x.x.x.x y.y.y.y, where x.x.x.x is the first IP address in the pool and y.y.y.y is the last IP address in the pool.';
-        //     var that = IPA.validator(spec);
+                var title;
+                if (!values.length) {
+                    title = text.get('@i18n:dialogs.remove_empty');
+                    window.alert(title);
+                    return null;
+                }
+                var dataResult = that.data.result.result;
+                dialog = IPA.alm.leases_search_deleter_dialog({}, dataResult);
+                //dialog.dataResult = dataResult;
 
-        //     that.validate = function(value) {
-        //         if (IPA.is_empty(value)) return that.true_result();
+                dialog.entity_name = that.managed_entity.name;
+                dialog.entity = that.managed_entity;
+                dialog.facet = that;
+                dialog.pkey_prefix = that.managed_entity_pkey_prefix();
 
-        //         that.address_type = 'IPv4';
+                title = text.get('@i18n:dialogs.remove_title');
+                var label = that.managed_entity.metadata.label;
+                dialog.title = title.replace('${entity}', label);
 
-        //         var components = value.split(" ");
-        //         if (components.length != 2) {
-        //             return that.false_result();
-        //         }
+                dialog.set_values(values);
 
-        //         var start = NET.ip_address(components[0]);
-        //         var end = NET.ip_address(components[1]);
-
-        //         if (!start.valid || start.type != 'v4-quads' || !end.valid || end.type != 'v4-quads') {
-        //             return that.false_result();
-        //         }
-
-        //         return that.true_result();
-        //     };
-
-        //     that.almrange_validate = that.validate;
-        //     return that;
-        // };
+                return dialog;
+            };
 
 
-        // IPA.almrange_subnet_validator = function(spec) {
-        //     spec = spec || {};
-        //     spec.message = spec.message || 'Invalid IP range.';
-        //     var that = IPA.validator(spec);
-
-        //     that.validate = function(value, context) {
-        //         if (context.container.rangeIsValid) {
-        //             return that.true_result();
-        //         }
-        //         that.message = context.container.invalidRangeMessage;
-        //         return that.false_result();
-        //     }
-
-        //     that.almrange_subnet_validate = that.validate;
-        //     return that;
-        // };
+            return that;
+        };
 
 
-//// Factories ////////////////////////////////////////////////////////////////
+//// modify search_deleter_dialog //////////////////////////////////////////////
+        IPA.alm.leases_search_deleter_dialog = function(spec, dataResult) {
+            
+            spec = spec || {};
+
+            var that = IPA.search_deleter_dialog(spec);
+
+            that.create_command = function() {
+                var batch = rpc.batch_command({
+                    error_message: '@i18n:search.partial_delete',
+                    name: that.entity.name + '_batch_del'
+                });
+
+                console.log(dataResult);
+                ///extend values with statements
+                for (var i = 0; i < that.values.length; i++) {
+                    for (var j = 0; j < dataResult.length; j++) {
+                        if (that.values[i] === dataResult[j].cn[0]) {
+                            that.values[i] = {
+                                cn : that.values[i],
+                                almstatements : dataResult[j].almstatements
+                            };
+                        }
+                    }
+                }
+                console.log(that.values);   
 
 
-        // IPA.alm.almpool_adder_dialog = function(spec) {
-        //     spec = spec || {}; //调用函数的时候如果 options 没指定，就给它赋值 {} , {} 是一个空的 Object。
-        //     var that = IPA.entity_adder_dialog(spec);
 
-        //     that.previous_almrange = [];
+                for (var i=0; i<that.values.length; i++) {
+                    //console.log(table);
+                    //console.log(that);
+                    var command = rpc.command({
+                        entity: 'alm',
+                        method: 'release'
+                    });
 
-        //     that.rangeIsValid = false;
-        //     that.invalidRangeMessage = "Invalid IP range."
+                    //if (that.pkey_prefix.length) command.add_args(that.pkey_prefix);
 
-        //     that.create_content = function() {
-        //         that.entity_adder_dialog_create_content();
-        //         var almrange_widget = that.fields.get_field('almrange').widget;
-        //         almrange_widget.value_changed.attach(that.almrange_changed);
-        //     };
+                    var value = that.values[i];
+                    if (value instanceof Object) {
+                        if (value.hasOwnProperty("almstatements")) {
+                            command.set_option("clientid", value.almstatements[0].split(' ')[1]);
+                            command.set_option("poolname", value.almstatements[1].split(' ')[1]);
+                            command.set_option("almpooltype", value.almstatements[2].split(' ')[1]);
+                            command.set_option("leasedaddress", value.almstatements[3].split(' ')[1]);
+                        }
+                    }
 
-        //     that.almrange_changed = function() {
+                    var add_attrs = that.additional_table_attrs;
+                    if (add_attrs && add_attrs.length && add_attrs.length > 0) {
+                        command = that.extend_command(command, add_attrs, value);
+                    }
 
-        //         var almrange_widget = that.fields.get_field('almrange').widget;
-        //         var almrange = almrange_widget.get_value();
-        //         var name_widget = that.fields.get_field('cn').widget;
-        //         var name = name_widget.get_value();
+                    batch.add_command(command);
+                }
 
-        //         if (name.length == 0) {
-        //             name_widget.update(almrange);
-        //         }
+                return batch;
+            };
 
-        //         if (name.length > 0 && name[0] == that.previous_almrange) {
-        //             name_widget.update(almrange);
-        //         }
-
-        //         that.previous_almrange = almrange;
-
-        //         // var firstValidationResult = that.fields.get_field('almrange').validators[0].validate(that.fields.get_field('almrange').get_value()[0])
-
-        //         // if (firstValidationResult.valid) {
-        //         //     setValidFlagCommand = rpc.command({
-        //         //         entity: 'almpool',
-        //         //         method: 'is_valid',
-        //         //         args: that.pkey_prefix.concat([almrange]),
-        //         //         options: {},
-        //         //         retry: false,
-        //         //         on_success: that.setValidFlag
-        //         //     });
-        //         //     setValidFlagCommand.execute();
-        //         // }
-        //     }
-
-        //     that.setValidFlag = function(data, text_status, xhr) {
-        //         that.rangeIsValid = data.result.result;
-        //         that.invalidRangeMessage = data.result.value;
-        //         that.validate();
-        //     }
-
-        //     return that;
-        // }
+            return that;
+        };
 
 
 //// almservice //////////////////////////////////////////////////////////////
@@ -302,24 +289,6 @@ define(
                 adder_dialog: {
                     fields: [
                         {
-                            //$type: 'entity_select',
-                            name: 'cn',
-                            required: true
-                        },
-                        {
-                            name: 'almrange',
-                            required: true
-                        },
-                        {
-                            name: 'almpooltype',
-                            required: true
-                        }
-                    ]
-                },
-                deleter_dialog: {
-                    fields: [
-                        {
-                            //$type: 'entity_select',
                             name: 'cn',
                             required: true
                         },
@@ -346,15 +315,15 @@ define(
                 facets: [
                     {
                         $type: 'search',
+                        $factory: IPA.alm.leases_search_facet,
+                        //no_update: true,
                         columns: [
                             'cn',
                             'almstatements'
                         ],
-                        actions: [
-                            'release'
-                        ],
-                        header_actions: ['release'
-                        ]
+                        deleter_dialog: {
+                            $factory: IPA.alm.leases_search_deleter_dialog
+                        }
                     },
                     {
                         $type: 'details',
@@ -393,121 +362,12 @@ define(
                         header_actions: ['release'
                         ]
                     }
-                ],
-                adder_dialog: {
-                	//name: 'lease',
-            		//method: 'alm_lease',
-                    fields: [
-                        {
-                            name: 'clientid',
-                            required: true
-                        },
-                        {
-                            name: 'poolname',
-                            required: true
-                        },
-                        {
-                            name: 'almpooltype',
-                            required: true
-                        },
-                        {
-                            name: 'requiredaddress'
-                        },
-                        {
-                        	name: 'expires'
-                        }
-                    ]
-                }
-
+                ]
             };
         };
         exp.almleases_entity_spec = make_almleases_spec();
-//// alm.action ///////////////////////////////////////////////////////////////
-// IPA.alm.create_lease_action = function(spec) {
 
-//     spec = spec || {};
-
-//     spec.name = spec.name || 'create_alm_lease';
-//     spec.label = spec.label || 'create_alm_lease';
-
-//     var that = IPA.action(spec);
-
-//     that.execute_action = function() {
-//         var spec = {
-//             title: '@i18n:objects.almleases.create_lease',
-//             message: '@i18n:objects.almleases.create_lease_msg',
-//             ok_label: '@i18n:objects.almleases.create_lease.'
-//         };
-
-//         that.dialog = IPA.confirm_dialog(spec);
-
-//         that.dialog.on_ok = function() {
-
-//             var command = rpc.command({
-//                 //entity: 'almleases',
-//                 method: 'alm_lease',
-//                 //args: 
-//                 options: {
-//                     clientid: 'uitester',
-//                     poolname: 'uitestpool',
-//                     almpooltype: 'ipv4'
-//                 }
-//             });
-
-//             command.execute();
-//         };
-
-//         that.dialog.open();
-//     };
-
-//     return that;
-// };
-
-// alm_release //////////////////////////////////////////////////////////////
-// IPA.user.release_action = function(spec) {
-//     spec = spec || {};
-//     spec.name = spec.name || 'delete_alm_lease';
-//     spec.label = spec.label || '@i18n:buttons.remove';
-
-//     var that = IPA.action(spec);
-
-//     that.execute_action = function(facet) {
-
-//         var pkey = facet.get_pkey();
-//         var msg = text.get('@i18n:actions.delete_confirm');
-//         msg = msg.replace('${object}', pkey);
-
-//         var spec = {
-//             message: msg,
-//             on_ok: function() {
-//                 rpc.command({
-//                     //entity: facet.entity.name,
-//                     method: 'alm_release',
-//                     //args: [pkey],
-//                     options: {
-//                         clientid: facet[1].sections[0].fields[3].name[0];
-//                         poolname: facet[1].sections[0].fields[3].name[1];
-//                         almpooltype: facet[1].sections[0].fields[3].name[2];
-//                         leasedaddress: facet[1].sections[0].fields[3].name[3];
-//                         //preserve: dialog.option_radio.get_value()[0]
-//                     },
-//                     on_success: function(data) {
-//                         IPA.notify_success(data.result.summary);
-//                         facet.on_update.notify();
-//                         facet.redirect();
-//                     }
-//                 }).execute();
-//             }
-//         };
-
-//         var dialog = IPA.user.details_delete_dialog(spec);
-
-//         dialog.open();
-//     };
-
-//     return that;
-// };
-/// release two ////////////////
+/// release action ////////////////
         exp.release_action = function(spec) {
             spec = spec || {};
             spec.name = spec.name || 'release';
@@ -515,23 +375,14 @@ define(
             spec.label = spec.label || '@i18n:buttons.revoke';
             spec.needs_confirm = spec.needs_confirm !== undefined ? spec.needs_confirm : true;
             spec.confirm_msg = spec.confirm_msg || '@i18n:actions.delete_confirm';
-            //spec.disable_cond = spec.disable_cond || ['oc_posixgroup','oc_ipaexternalgroup'];
-            //exp.entity.get_facet()
-            //var facets = facet.entity.facets;
-            //spec.options = 
-            //                 clientid: facet.sections[0].fields[3].name[0].split(' ')[1],
-            //                 poolname: facet.sections[0].fields[3].name[1].split(' ')[1],
-            //                 almpooltype: facet.sections[0].fields[3].name[2].split(' ')[1],
-            //                 leasedaddress: facet.sections[0].fields[3].name[3].split(' ')[1]
-            //                 //preserve: dialog.option_radio.get_value()[0]
-            // };
+
         
             var that = IPA.object_action(spec);
 
             that.execute_action = function(facet, on_success, on_error) {
             	//var arg = facet.get_facet_groups();
             	//var summary = data.result.summary || {};
-            	console.log(facet);
+            	//console.log(facet);
             	var data = facet.data.result.result;
 
             	//console.log(IPA.field);
@@ -539,7 +390,7 @@ define(
             						"clientid": data.almstatements[0].split(' ')[1],
             						"poolname": data.almstatements[1].split(' ')[1],
             						"almpooltype": data.almstatements[2].split(' ')[1],
-            						"leasedaddress": data.almstatements[3].split(' ')[1],
+            						"leasedaddress": data.almstatements[3].split(' ')[1]
             	}
 
             	
@@ -558,6 +409,11 @@ define(
             return that;
         };
 
+
+
+
+
+
 //// exp.register /////////////////////////////////////////////////////////////
 
 
@@ -566,17 +422,19 @@ define(
             // v.register('almrange', IPA.almrange_validator);
             // v.register('almrange_subnet', IPA.almrange_subnet_validator);
             var a = reg.action;
-            var e = reg.entity;
-            
-
             a.register('release', exp.release_action);
+            
+            var e = reg.entity;
+            //var d = reg.dialog;
+            //var fa = reg.facet;
             e.register({type: 'almservice', spec: exp.almservice_entity_spec});
             // e.register({type: 'almsubnet', spec: exp.almsubnet_entity_spec});
             e.register({type: 'almpool', spec: exp.almpool_entity_spec});
             e.register({type: 'almleases', spec: exp.almleases_entity_spec});
+            //d.register('')
             // e.register({type: 'almserver', spec: exp.almserver_entity_spec});
             
-        }
+        };
 
 
 //// menu spec ////////////////////////////////////////////////////////////////
@@ -604,13 +462,16 @@ define(
                 }
 
             ]
-        }
+        };
 
         exp.add_menu_items = function() {
-            network_services_item = menu.query({name: 'network_services'});
-            if (network_services_item.length > 0) {
-                menu.add_item( exp.alm_menu_spec, 'network_services' );
-            }
+            //top = menu.get();
+            //console.log(top);
+            menu.add_item( exp.alm_menu_spec, 'network_services');
+            //network_services_item = menu.query({name: 'network_services'});
+            // if (network_services_item.length > 0) {
+            //     menu.add_item( exp.alm_menu_spec, 'network_services' );
+            // }
         };
 
 
@@ -619,6 +480,7 @@ define(
 
         exp.customize_host_ui = function() {
             var adder_dialog = IPA.host.entity_spec.adder_dialog;
+            var deleter_dialog = IPA.alm.leases_search_deleter_dialog;
             var fields = adder_dialog.sections[1].fields;
             var macaddress_field_spec = {
                 $type: 'multivalued',
