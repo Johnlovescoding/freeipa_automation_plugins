@@ -468,6 +468,8 @@ define(
             //top = menu.get();
             //console.log(top);
             menu.add_item( exp.alm_menu_spec, 'network_services');
+            //menu.add_item( exp.alm_menu_spec, 'admin');
+            //top.push(exp.alm_menu_spec);
             //network_services_item = menu.query({name: 'network_services'});
             // if (network_services_item.length > 0) {
             //     menu.add_item( exp.alm_menu_spec, 'network_services' );
