@@ -863,8 +863,8 @@ class almpool_del(Command):
                     thispoolname = ' '
                     leasedaddr = ' '
 
-                    for statement in lease['almstatements']:
-
+                    almStatements = lease.get('almstatements', [])
+                    for statement in almStatements:
                         if statement.startswith('poolname '):
                             (s, v) = statement.split(' ', 1)
                             thispoolname = v
@@ -938,7 +938,7 @@ class almleases(LDAPObject):
             cli_name='poolnameaddress',
             label=_('alm lease cn'),
             doc=_('alm lease cn.'),
-            primary_key=True
+            primary_key=True  # UI plugins's facet will use this.
         ),
         Str(
             'almaddressstate*',
