@@ -19,9 +19,11 @@ define(
     function(IPA, menu, phases, reg, rpc, NET, mod_search, text) {
     // dependencies path: install/ui/src/freeipa
 
+
         var exp = IPA.alm = {};
 
-//// modify search_facet //////////////////////////////////////////////
+
+//// modify leases_search_facet //////////////////////////////////////////////
         IPA.alm.leases_search_facet = function(spec) {
             spec = spec || {};
 
@@ -60,6 +62,63 @@ define(
             return that;
         };
 
+//// modify leases_details_facet //////////////////////////////////////////////
+        IPA.alm.details_facet = function(spec) {
+            spec = spec || {};
+
+            var that = IPA.details_facet(spec);
+            
+            //var dataResult = that.data.result.result;
+
+            that.update_command_name = that.update_command_name + '_almschema'
+
+            that.create_fields_update_command = function(update_info) {
+
+                var args = that.get_pkeys();
+
+                var options = {};
+                if (that.get_all_attrs) options.all = true;
+                //if (that.check_rights) options.rights = true;
+
+                var command = rpc.command({
+                    entity: that.entity.name,
+                    method: that.update_command_name,
+                    args: args,
+                    options: options
+                });
+
+                //set command options
+                that.add_fields_to_command(update_info, command);
+
+                return command;
+            };
+        
+            that.create_update_command = function() {
+
+                var command, update_info;
+
+                if (that.command_mode === 'info') {
+                    update_info = that.get_update_info();
+                } else {
+                    update_info = that.save_as_update_info(true, true);
+                }
+
+                if (update_info.commands.length <= 0) {
+                    //normal command
+                    command = that.create_fields_update_command(update_info);
+                } else {
+                    //batch command
+                    command = that.create_batch_update_command(update_info);
+                }
+
+                console.log(command);
+
+                return command;
+            };
+
+
+            return that;
+        };
 
 //// modify search_deleter_dialog //////////////////////////////////////////////
         IPA.alm.leases_search_deleter_dialog = function(spec, dataResult) {
@@ -74,7 +133,7 @@ define(
                     name: that.entity.name + '_batch_del'
                 });
 
-                console.log(dataResult);
+                //console.log(dataResult);
                 ///extend values with statements
                 for (var i = 0; i < that.values.length; i++) {
                     for (var j = 0; j < dataResult.length; j++) {
@@ -86,7 +145,7 @@ define(
                         }
                     }
                 }
-                console.log(that.values);   
+                //console.log(that.values);   
 
 
 
@@ -98,17 +157,42 @@ define(
                         method: 'release'
                     });
 
-                    //if (that.pkey_prefix.length) command.add_args(that.pkey_prefix);
-
                     var value = that.values[i];
+                    
+                    var clientid, poolname, almpooltype, leasedaddress;
+
                     if (value instanceof Object) {
-                        if (value.hasOwnProperty("almstatements")) {
-                            command.set_option("clientid", value.almstatements[0].split(' ')[1]);
-                            command.set_option("poolname", value.almstatements[1].split(' ')[1]);
-                            command.set_option("almpooltype", value.almstatements[2].split(' ')[1]);
-                            command.set_option("leasedaddress", value.almstatements[3].split(' ')[1]);
+                        if (value.hasOwnProperty("almstatements") && value.almstatements !== undefined) {
+                            for (var j=0; j<value.almstatements.length; j++) {
+                                if (value.almstatements[j].startsWith("clientid")) {
+                                    clientid = value.almstatements[j].split(' ')[1];
+                                }
+                                if (value.almstatements[j].startsWith("poolname")) {
+                                    poolname = value.almstatements[j].split(' ')[1];
+                                }
+                                if (value.almstatements[j].startsWith("almpooltype")) {
+                                    almpooltype = value.almstatements[j].split(' ')[1];
+                                }
+                                if (value.almstatements[j].startsWith("leasedaddr")) {
+                                    leasedaddress = value.almstatements[j].split(' ')[1];
+                                }            
+
+                            }
                         }
                     }
+                    if (clientid === undefined || poolname === undefined || almpooltype === undefined || leasedaddress === undefined) {
+                        clientid = clientid===undefined ? "clientid" : "";
+                        poolname = poolname===undefined ? "poolname" : "";
+                        almpooltype = almpooltype===undefined ? "almpooltype" : "";
+                        leasedaddress = leasedaddress===undefined ? "leasedaddress" : "";
+                        throw new Error("missing parameters are:" + clientid + " " + poolname + " " + almpooltype + " " + leasedaddress);
+                    }
+
+
+                    command.set_option("clientid", clientid);
+                    command.set_option("poolname", poolname);
+                    command.set_option("almpooltype", almpooltype);
+                    command.set_option("leasedaddress", leasedaddress);
 
                     var add_attrs = that.additional_table_attrs;
                     if (add_attrs && add_attrs.length && add_attrs.length > 0) {
@@ -221,6 +305,7 @@ define(
                     },
                     {
                         $type: 'details',
+                        //$factory: IPA.alm.details_facet,
                         sections: [
                             {
                                 name: 'options',
@@ -327,6 +412,7 @@ define(
                     },
                     {
                         $type: 'details',
+                        $factory: IPA.alm.details_facet,
                         sections: [
                             {
                                 name: 'almparameters',
@@ -383,14 +469,45 @@ define(
             	//var arg = facet.get_facet_groups();
             	//var summary = data.result.summary || {};
             	//console.log(facet);
+
             	var data = facet.data.result.result;
+
+                var clientid, poolname, almpooltype, leasedaddress;
+
+                if (data instanceof Object) {
+                    if (data.hasOwnProperty("almstatements") && data.almstatements !== undefined) {
+                        for (var j=0; j<data.almstatements.length; j++) {
+                            if (data.almstatements[j].startsWith("clientid")) {
+                                clientid = data.almstatements[j].split(' ')[1];
+                            }
+                            if (data.almstatements[j].startsWith("poolname")) {
+                                poolname = data.almstatements[j].split(' ')[1];
+                            }
+                            if (data.almstatements[j].startsWith("almpooltype")) {
+                                almpooltype = data.almstatements[j].split(' ')[1];
+                            }
+                            if (data.almstatements[j].startsWith("leasedaddr")) {
+                                leasedaddress = data.almstatements[j].split(' ')[1];
+                            }            
+
+                        }
+                    }
+                }
+
+                if (clientid === undefined || poolname === undefined || almpooltype === undefined || leasedaddress === undefined) {
+                    clientid = clientid===undefined ? "clientid" : "";
+                    poolname = poolname===undefined ? "poolname" : "";
+                    almpooltype = almpooltype===undefined ? "almpooltype" : "";
+                    leasedaddress = leasedaddress===undefined ? "leasedaddress" : "";
+                    throw new Error("missing parameters are:" + clientid + " " + poolname + " " + almpooltype + " " + leasedaddress);
+                }
 
             	//console.log(IPA.field);
             	var data2options = {
-            						"clientid": data.almstatements[0].split(' ')[1],
-            						"poolname": data.almstatements[1].split(' ')[1],
-            						"almpooltype": data.almstatements[2].split(' ')[1],
-            						"leasedaddress": data.almstatements[3].split(' ')[1]
+            						"clientid": clientid,
+            						"poolname": poolname,
+            						"almpooltype": almpooltype,
+            						"leasedaddress": leasedaddress
             	}
 
             	
