@@ -15,8 +15,8 @@
 
 
 #### Imports ##################################################################
-
-
+import functools
+import logging
 from ipalib import _, ngettext
 from ipalib import api, errors, output, Command
 from ipalib.output import Output, Entry, ListOfEntries
@@ -40,6 +40,32 @@ import fcntl
 import os
 #import string
 
+# logging.basicConfig(level=logging.WARNING,
+#                     filename='/var/log/ipa-alm/debug_log',
+#                     filemode='w',
+#                     format='%(asctime)s - %(filename)s[line:%(lineno)d] - %(levelname)s: %(message)s'
+#                     )
+
+#step 1, create a logger
+# logger = logging.getLogger(__name__) #生成logger instance，命名为alm
+# logger.setLevel(logging.INFO) # Log等级总开关
+#
+# #step 2, create a handler to write logfile
+# logfile = '/var/log/ipa-alm/debug_log'
+# fh = logging.FileHandler(logfile, mode = 'w')
+# fh.setLevel((logging.DEBUG))
+#
+# #step 3, define the format
+# formatter = logging.Formatter("%(asctime)s - %(filename)s[line:%(lineno)d] - %(levelname)s: %(message)s")
+# fh.setFormatter(formatter)
+#
+# #step 4, add handler into logger
+# logger.addHandler(fh)
+
+#logger = logging.getLogger(__name__)
+
+# formatter = logging.Formatter('%(asctime)s %(levelname)-8s: %(message)s')
+# file_handler = logging.FileHandler("test.log")
 #### lock file mechanisam for multi-write from different users at same time#################
 
 global_lock_file_path = '/var/lock/ipa-alm/'
@@ -65,8 +91,8 @@ def _unlock(fhandler):
         raise BaseException("unlock error: %s", err)
 
 def _add_lock(objectname, cn):
-    cn = cn.replace('/', '_')
-    lock_file_path = global_lock_file_path + 'write' + objectname + '_' + cn
+    cn = cn.replace('/', '-')
+    lock_file_path = global_lock_file_path + 'write' + '-' + objectname + '-' + cn
     fhandler = _try_lock(lock_file_path)
     if fhandler is None:
         count = 30
@@ -75,12 +101,44 @@ def _add_lock(objectname, cn):
             count -= 1
             fhandler = _try_lock(lock_file_path)
     return fhandler
+
+def lockdecorator(func):
+    @functools.wraps(func)
+    def wrapper(self, *keys, **options):
+        segments = self.__class__.__name__.split("_") #ex: almleases_mod_almschema
+        fileheader = ""
+        if len(segments) > 0 :
+            fileheader = segments[0]
+        else :
+            raise errors.PublicError('Cannot find Class Name of this Method')
+        # / / / / / / / / / add a lock file here / / / / / / / / / / *
+        if len(keys) > 0:
+            cn = keys[0]
+        else :
+            cn = 'NotFound'
+            raise errors.PublicError('Cannot find cn of this entry')
+
+        fhandler = _add_lock(fileheader, cn) #object_name
+        logging.warning(fileheader)
+        logging.warning(cn)
+        try:
+            if fhandler:
+                return func(self, *keys, **options)
+        finally:
+            if fhandler:
+                #time.sleep(20)
+                _unlock(fhandler)
+            else:
+                return dict(result=dict(result=False, value=u'other user is locking this entry'), value=cn)
+    return wrapper
 #### Constants ################################################################
 
 
 containerdn = DN(('cn', 'alm'))
 pool_container_dn = DN(('cn', 'pool'), containerdn) #每个LDAPOject中的container_dn为存该entry的container目录，不需要定义完全，LDAP会自动存到api.env.basedn中
 lease_container_dn = DN((('cn', 'lease')), containerdn)#在update文件中，先定义alm, pool, lease三个almservice  entry作为container用
+
+
 register = Registry()
 
 
@@ -290,6 +348,7 @@ class almservice_mod(LDAPUpdate):
 
 @register()
 class almpool(LDAPObject):
+
     #parent_object = 'almservice'
     container_dn = pool_container_dn
     object_name = _('alm pool')
@@ -451,6 +510,8 @@ class almpool_add_almschema(LDAPCreate):
         #container_dn = DN('cn=pool', 'cn=alm')
         # Allow known and unknown clients by default.
 
+
+
         entry_attrs['almpermitlist'] = ['allow unknown-clients', 'allow known-clients']
 
         # If the almService entry has almstatements attributes that start with
@@ -545,6 +606,7 @@ class almpool_mod_almschema(LDAPUpdate):
     msg_summary = _('Modified a alm pool.')
 
     def pre_callback(self, ldap, dn, entry_attrs, attrs_list, *keys, **options):
+
         assert isinstance(dn, DN)
 
         entry = ldap.get_entry(dn)
@@ -606,10 +668,22 @@ class almpool_mod_almschema(LDAPUpdate):
 
         return dn
 
+
+
     def post_callback(self, ldap, dn, entry_attrs, *keys, **options):
         assert isinstance(dn, DN)
         entry_attrs = almpool.extract_virtual_params(ldap, dn, entry_attrs, keys, options)
         return dn
+
+    @lockdecorator
+    def execute(self, *keys, **options):
+        result = super(self.__class__, self).execute(*keys, **options)
+        return result
+
+@register()
+class almpool_mod_nolock(LDAPUpdate):
+    __doc__ = _('Modify a alm pool without lock.')
+    msg_summary = _('Modified a alm pool without lock.')
 
 
 @register()
@@ -639,7 +713,7 @@ class almpool_is_valid(Command):
         )
     )
 
-    def execute(self, *args, **kw):
+    def execute(self, *args, **kw): #函数的参数定义是(*args, **kw)，因此，execute()函数可以接受任意参数的调用
         # Run some basic sanity checks on a alm pool IP range to make sure it
         # fits into its parent alm subnet. This method looks up the parent
         # subnet given the necessary LDAP keys because that's what works best
@@ -725,7 +799,7 @@ class almpool_add(Command):
 
         ############ add lock #########################################################################################
 
-        fhandler = _add_lock('pool', cn)
+        fhandler = _add_lock('almpool', cn)
 
         try:
             if fhandler:
@@ -749,6 +823,7 @@ class almpool_mod(Command):
     __doc__ = _('Modify a new alm pool.')
     msg_summary = _('Modify alm pool "%(value)s"')
 
+
     takes_args = (
         Str(
             'cn',
@@ -767,13 +842,23 @@ class almpool_mod(Command):
             cli_name='range',
             label=_('Range'),
             doc=_('alm range.')
+        ),
+        Str(
+            'almstatements*',
+            cli_name='almstatements',
+            label=_('alm Statements'),
+            doc=_('alm statements.')
         )
     )
 
     def execute(self, *args, **kw):
+        #logger.info(args)
+        #logger.info(kw)
+        #logging.info(kw)
         cn = args[0]
         pooltype = args[1]
         poolrange = args[2]
+        almstatements = args[3]
 
         typelist = ['ipv4', 'ipv6', 'macaddress', 'string']
 
@@ -806,7 +891,7 @@ class almpool_mod(Command):
         except:
             return dict(result=False, value=u'startaddr and endaddr are not in same subnet')
         ################################ add lock #############################################################################
-        fhandler = _add_lock('pool', cn)
+        fhandler = _add_lock('almpool', cn)
 
         try:
             if fhandler:
@@ -843,10 +928,8 @@ class almpool_del(Command):
 
     def execute(self, *args, **kw):
         cn = args[0]
-
-
         ########################## add lock ###################################################################################
-        fhandler = _add_lock('pool', cn)
+        fhandler = _add_lock('almpool', cn)
         try:
             if fhandler:
                 #################check leases and make sure no lease belonging to this pool is valid###############################
@@ -859,11 +942,10 @@ class almpool_del(Command):
                 #     return dict(result=dict(result=False, value=u'No one lease exists. '), value=cn)
 
                 for lease in resultlease['result']:
-                    expires = ' '
                     thispoolname = ' '
-                    leasedaddr = ' '
 
                     almStatements = lease.get('almstatements', [])
+
                     for statement in almStatements:
                         if statement.startswith('poolname '):
                             (s, v) = statement.split(' ', 1)
@@ -885,9 +967,7 @@ class almpool_del(Command):
                 _unlock(fhandler)
             else:
                 return dict(result=dict(result=False, value=u'other user is locking the pool'), value=cn)
-
 ###########################################################################################################
-
 
 
 #### almleases ###############################################################
@@ -1152,8 +1232,9 @@ class almleases_mod_almschema(LDAPUpdate):
     __doc__ = _('Modify a alm leases.')
     msg_summary = _('Modified a alm leases.')
 
-    # def pre_callback(self, ldap, dn, entry_attrs, attrs_list, *keys, **options):
-    #     assert isinstance(dn, DN)
+    def pre_callback(self, ldap, dn, entry_attrs, attrs_list, *keys, **options):
+        assert isinstance(dn, DN)
+        return dn
     #
     #     entry = ldap.get_entry(dn)
     #
@@ -1201,6 +1282,12 @@ class almleases_mod_almschema(LDAPUpdate):
         entry_attrs = almleases.extract_virtual_params(ldap, dn, entry_attrs, keys, options)
         return dn
 
+
+
+    @lockdecorator
+    def execute(self, *keys, **options):
+        result = super(self.__class__, self).execute(*keys, **options)
+        return result
 
 @register()
 class almleases_del_almschema(LDAPDelete):
@@ -1252,7 +1339,7 @@ class almleases_add(Command):
 
 #############################################################################################################
         #string_tabtrans = str(cn).maketrans('-./', '___')
-        fhandler = _add_lock('lease', cn)
+        fhandler = _add_lock('almleases', cn)
 
         try:
             if fhandler:
@@ -1313,7 +1400,7 @@ class almleases_mod(Command):
         statements = args[3] if len(args) >= 4 else None
 
         #############################################################################################################
-        fhandler = _add_lock('lease', cn)
+        fhandler = _add_lock('almleases', cn)
         try:
             if fhandler:
                 result = api.Command['almleases_mod_almschema'](
@@ -1351,7 +1438,7 @@ class almleases_del(Command):
         cn = args[0]
 
         ############################ add lock #################################################################################
-        fhandler = _add_lock('lease', cn)
+        fhandler = _add_lock('almleases', cn)
         try:
             if fhandler:
                 result = api.Command['almleases_del_almschema'](
@@ -1676,7 +1763,7 @@ class alm_lease(Command):
 
         ################################ add lock #############################################################################
 
-        fhandlerPool = _add_lock('pool_', poolname)
+        fhandlerPool = _add_lock('almpool', poolname)
 
         try:
             if fhandlerPool:
@@ -1866,6 +1953,9 @@ class alm_release(Command):
 
 
     def execute(self, *args, **kw):
+        # logging.error(args)
+        # logging.error(kw)
+
         clientid = args[0]
         poolname = args[1]
         pooltype = args[2]
@@ -1874,9 +1964,9 @@ class alm_release(Command):
         leasecn = u'{0}'.format(poolname + '-' + leasedaddr)
         thispool = poolname
         ###    add ##########################################################################################################
-        fhandler1 = _add_lock('pool', poolname) #   add lock on the pool
-        fhandler2 = _add_lock('pool', 'deleted_pool')#  if the pool doesnt exist, we have to create a pool to store set-free leases
-        fhandler3 = _add_lock('lease', leasecn)  # add lock on the pool
+        fhandler1 = _add_lock('almpool', poolname) #   add lock on the pool
+        fhandler2 = _add_lock('almpool', 'deleted_pool')#  if the pool doesnt exist, we have to create a pool to store set-free leases
+        fhandler3 = _add_lock('almleases', leasecn)  # add lock on the pool
         resultleasedeleted = None
         result = None
         try:
@@ -1932,7 +2022,7 @@ class alm_release(Command):
 
 
                 cn = u'{0}'.format(poolname)
-                result = api.Command['almpool_mod_almschema'](
+                result = api.Command['almpool_mod_nolock'](
                     cn,
                     almpooltype=u'{0}'.format(pooltype),
                     almrange=u'{0}'.format(modRange)
