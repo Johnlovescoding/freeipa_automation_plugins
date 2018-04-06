@@ -85,6 +85,7 @@ def _unlock(fhandler):
     """Unlock app - remove lock file ``fhandler``."""
     fname = fhandler.name
     try:
+        #time.sleep(3)
         fhandler.close()
         os.unlink(fname)
     except IOError as err:
@@ -1021,7 +1022,7 @@ class almleases(LDAPObject):
             primary_key=True  # UI plugins's facet will use this.
         ),
         Str(
-            'almaddressstate*',
+            'almaddressstate?',
             cli_name='almaddressstate',
             label=_('alm address state'),
             doc=_('alm address state.')
@@ -1033,7 +1034,7 @@ class almleases(LDAPObject):
             doc=_('alm statements.')
         ),
         Str(
-            'almleasestarttime*',
+            'almleasestarttime?',
             cli_name='almleasestarttime',
             label=_('alm lease start time'),
             doc=_('alm lease start time.')
@@ -1289,6 +1290,14 @@ class almleases_mod_almschema(LDAPUpdate):
         result = super(self.__class__, self).execute(*keys, **options)
         return result
 
+
+
+
+@register()
+class almleases_mod_nolock(LDAPUpdate):
+    __doc__ = _('Modify a alm leases no lock.')
+    msg_summary = _('Modified a alm leases no lock.')
+
 @register()
 class almleases_del_almschema(LDAPDelete):
     __doc__ = _('Delete a alm leases.')
@@ -1312,13 +1321,13 @@ class almleases_add(Command):
             primary_key=True
         ),
         Str(
-            'almaddressstate*',
+            'almaddressstate?',
             cli_name='almaddressstate',
             label=_('alm address state'),
             doc=_('alm address state.')
         ),
         Str(
-            'almleasestarttime*',
+            'almleasestarttime?',
             cli_name='almleasestarttime',
             label=_('alm lease start time'),
             doc=_('alm lease start time.')
@@ -1365,7 +1374,7 @@ class almleases_mod(Command):
     __doc__ = _('Modify a alm lease.')
     msg_summary = _('Modify alm lease "%(value)s"')
 
-    takes_args = (
+    takes_options = (
         Str(
             'cn',
             cli_name='poolnameaddress',
@@ -1374,13 +1383,13 @@ class almleases_mod(Command):
             primary_key=True
         ),
         Str(
-            'almaddressstate*',
+            'almaddressstate?',
             cli_name='almaddressstate',
             label=_('alm address state'),
             doc=_('alm address state.')
         ),
         Str(
-            'almleasestarttime*',
+            'almleasestarttime?',
             cli_name='almleasestarttime',
             label=_('alm lease start time'),
             doc=_('alm lease start time.')
@@ -1390,20 +1399,34 @@ class almleases_mod(Command):
             cli_name='almstatements',
             label=_('alm Statements'),
             doc=_('alm statements.')
-        )
+        ),
     )
 
     def execute(self, *args, **kw):
-        cn = args[0]
-        leasestate = args[1] if len(args) >= 2 else u'leased'
-        starttime = args[2] if len(args) >= 3 else u'{0}'.format(int(time.time()))
-        statements = args[3] if len(args) >= 4 else None
+        # logging.warning("args are: ")
+        # logging.warning(args)
+        logging.warning("kws are: ")
+        logging.warning(kw)
+        cn = u'cn'
+        leasestate = u'leased'
+        starttime = u'{0}'.format(int(time.time()))
+        statements = None
+
+        if 'cn' in kw:
+            cn = kw.get('cn')
+        if 'almaddressstate' in kw:
+            leasestate = kw.get('almaddressstate')
+        if 'almleasestarttime' in kw:
+            starttime = kw.get('almleasestarttime')
+        if 'almstatement' in kw:
+            statements = kw.get('almstatement')
+
 
         #############################################################################################################
         fhandler = _add_lock('almleases', cn)
         try:
             if fhandler:
-                result = api.Command['almleases_mod_almschema'](
+                result = api.Command['almleases_mod_nolock'](
                     cn=u'{0}'.format(cn),
                     almaddressstate=u'{0}'.format(leasestate),
                     almleasestarttime=u'{0}'.format(starttime),
@@ -1710,8 +1733,8 @@ class alm_lease(Command):
     has_output = output.standard_entry
     __doc__ = _('create a alm lease.')
 
-
-    takes_args = (
+    takes_options = (
+    #takes_args = (
         Str(
             'clientid',
             cli_name='clientid',
@@ -1752,11 +1775,44 @@ class alm_lease(Command):
 
 
     def execute(self, *args, **kw):
-        clientid = args[0]
-        poolname = args[1]
-        pooltype = args[2]
-        expiretime = args[3] if len(args) >= 4 else u'{0}'.format(int(time.time()) + 31536000)
-        requiredaddr = args[4] if len(args) >= 5 else 'default'
+        logging.warning(args)
+        logging.warning(kw)
+        clientid = 'clientid'
+        poolname = 'poolname'
+        pooltype = 'pooltype'
+        expiretime = u'{0}'.format(int(time.time()) + 31536000)
+        requiredaddr = 'default'
+
+
+        if 'clientid' in kw:
+            clientid = kw.get('clientid')
+        if 'poolname' in kw:
+            poolname = kw.get('poolname')
+        if 'almpooltype' in kw:
+            almpooltype = kw.get('almpooltype')
+        if 'expires' in kw:
+            expiretime = kw.get('expires')
+        if 'requiredaddress' in kw:
+            requiredaddr = kw.get('requiredaddress')
+
+
+        # clientid = args[0]
+        # poolname = args[1]
+        # pooltype = args[2]
+        # expireTemp = args[3] if len(args) >= 4 else u'{0}'.format(int(time.time()) + 31536000)
+        # addrTemp = args[4] if len(args) >= 4 else 'default'
+        #
+        # logging.warning(args)
+        # logging.warning(expireTemp.isdigit())
+        #
+        # if expireTemp.isdigit():
+        #     expiretime = expireTemp
+        #     requiredaddr = addrTemp
+        # else:
+        #     requiredaddr = expireTemp
+        #     expiretime = addrTemp if addrTemp.isdigit() else u'{0}'.format(int(time.time()) + 31536000)
+
+
         ######two types of expires: absolute time, + duration time#################################################################
         if '+' in expiretime:
             expiretime = u'{0}'.format(int(expiretime.replace(" ", "").split("+")[1]) + int(time.time()))
@@ -1765,8 +1821,10 @@ class alm_lease(Command):
 
         fhandlerPool = _add_lock('almpool', poolname)
 
+
         try:
             if fhandlerPool:
+                logging.warning("have locked pool : %s ", poolname)
                 ######################check the pool#######################################################################################
                 cn = u'{0}'.format(poolname)
                 resultpoolshow = api.Command['almpool_show'](cn)
@@ -1837,7 +1895,7 @@ class alm_lease(Command):
                         # modRange = pl.beString(pooltype)
                         modRange = pl.tostring()
                         cn = u'{0}'.format(pool)
-                        resultpoolmod = api.Command['almpool_mod_almschema'](  # 可能没有lease过期，这里可能不会mod pool
+                        resultpoolmod = api.Command['almpool_mod_nolock'](  # 可能没有lease过期，这里可能不会mod pool
                             cn,
                             almpooltype=u'{0}'.format(pooltype),
                             almrange=u'{0}'.format(modRange)
@@ -1860,11 +1918,12 @@ class alm_lease(Command):
                 pool = poolstructure()
                 pool.poolSet(almrange[0])  # 注意在add pool并添加range的时候，range可以是192.1-192.10 或 192.1 192.10，要统一格式。
 
+                logging.warning("requiredaddr : %s ", requiredaddr)
                 if pool.search(requiredaddr):
                     getaddr = requiredaddr
                 else:
                     getaddr = pool.getRandom()  # automatically delete this Randomly gotten node
-
+                logging.warning("getaddr : %s ", getaddr)
                 deletepool = pool.delete(getaddr)
 
                 if getaddr == '':
@@ -1873,6 +1932,7 @@ class alm_lease(Command):
                 #  create a lease     ##########################
 
                 cnleaseadd = u'{0}'.format(poolname + '-' + getaddr)
+                logging.warning("ready to add a lease : %s ", cnleaseadd)
                 resultleaseadd = api.Command['almleases_add'](
                     cnleaseadd,
                     almaddressstate=u'leased',
@@ -1894,7 +1954,7 @@ class alm_lease(Command):
 
                 try:
                     cn = u'{0}'.format(poolname)
-                    resultpoolmod2 = api.Command['almpool_mod_almschema'](
+                    resultpoolmod2 = api.Command['almpool_mod_nolock'](
                         cn,
                         almpooltype=u'{0}'.format(pooltype),
                         almrange=u'{0}'.format(modRange)
@@ -1922,7 +1982,7 @@ class alm_release(Command):
     __doc__ = _('revoke/release a alm lease.')
 
 
-    takes_args = (
+    takes_options = (
         Str(
             'clientid',
             cli_name='clientid',
@@ -1953,36 +2013,55 @@ class alm_release(Command):
 
 
     def execute(self, *args, **kw):
-        # logging.error(args)
-        # logging.error(kw)
+        logging.error(args)
+        logging.error(kw)
 
-        clientid = args[0]
-        poolname = args[1]
-        pooltype = args[2]
-        leasedaddr = args[3] if len(args) >= 4 else 'default'
+        clientid = u'clientid'
+        poolname = u'poolname'
+        pooltype = u'pooltype'
+        leasedaddr = u'default'
+
+        if 'clientid' in kw:
+            clientid = kw.get('clientid')
+        if 'poolname' in kw:
+            poolname = kw.get('poolname')
+        if 'almpooltype' in kw:
+            pooltype = kw.get('almpooltype')
+        if 'leasedaddress' in kw:
+            leasedaddr = kw.get('leasedaddress')
 
         leasecn = u'{0}'.format(poolname + '-' + leasedaddr)
         thispool = poolname
-        ###    add ##########################################################################################################
+        ###    add      ##########################################################################################################
         fhandler1 = _add_lock('almpool', poolname) #   add lock on the pool
         fhandler2 = _add_lock('almpool', 'deleted_pool')#  if the pool doesnt exist, we have to create a pool to store set-free leases
         fhandler3 = _add_lock('almleases', leasecn)  # add lock on the pool
         resultleasedeleted = None
         result = None
         try:
+            logging.warning("starting release")
             if fhandler1 and fhandler2 and fhandler3:
+                logging.warning("successfully add three lock files")
                 ###   search lease    ###
                 cn = u'{0}'.format(poolname + '-' + leasedaddr)
 
-                result = api.Command['almleases_show'](cn)
+                try:
+                    result = api.Command['almleases_show'](cn)
+                except :#Exception as err:
+                    logging.warning("Cannot find this lease")
+                    raise errors.PublicError(
+                    'Cannot find this lease: %s ！Please check poolname!' % cn)
+
+                logging.warning("has throwed a exception")
                 for statement in result['result']['almstatements']:
                     if statement.startswith('expires '):
                         (s, v) = statement.split(' ', 1)
                         expires = v
 
                 ###    如果lease_show失败，直接跳出
-
+                logging.warning(cn)
                 resultleasedeleted = api.Command['almleases_del_almschema'](cn)
+                logging.warning("almleases has been deleted")
 
                 ###    read pool    ###
                 try:
@@ -1991,6 +2070,7 @@ class alm_release(Command):
 
                 ###    edge case: create a lease, then delete the pool, then revoke the lease     ###
                 # pool_mod fail.
+
                 except:
                     try:
                         cn = u'deleted_pool'
@@ -2029,7 +2109,9 @@ class alm_release(Command):
                 )
                 return dict(result=result['result'], value=u'successfully release!')
         except Exception as err:
+            logging.warning("catch a exception and recover lease")
             #     如果在删除lease后，后续操作有error，就还原已删除的lease
+            logging.warning(resultleasedeleted)
             if resultleasedeleted is not None:
                 resultleaseadd = api.Command['almleases_add_almschema'](
                     leasecn,
@@ -2042,6 +2124,11 @@ class alm_release(Command):
                         u'{0}'.format("clientID " + clientid)
                     ]
                 )
+            else:
+                raise errors.PublicError(
+                    'Cannot find this lease: %s ！Please check poolname!' % leasecn)
+
+
             return dict(result=dict(result=False, value=u'{0}'.format(err)), value=cn)
 
 
